@@ -29,7 +29,7 @@ public class DocController {
 ### 该怎么做
 
 <p align="center">
-  <img width="320" src="https://github.com/calebman/cetty/blob/master/images/flow.png">
+  <img src="https://github.com/calebman/cetty/blob/master/images/flow.png">
 </p>
 
 * 使用Netty自带的编解码、聚合器构建一个带有Http编解码功能的服务器
