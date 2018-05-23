@@ -26,21 +26,19 @@ public class TestController {
 
     @RequestMapping("/obj")
     public Object obj(FullHttpRequest fullHttpRequest) {
-        System.out.println();
-        System.out.println();
-        System.out.println("----------");
+        System.out.println("\n\n----------");
         HttpHeaders httpHeaders = fullHttpRequest.headers();
         Set<String> names = httpHeaders.names();
         for (String name : names) {
             System.out.println(name + " : " + httpHeaders.get(name));
         }
+        System.out.println("");
         ByteBuf byteBuf = fullHttpRequest.content();
         byte[] byteArray = new byte[byteBuf.capacity()];
         byteBuf.readBytes(byteArray);
         System.out.println(new String(byteArray));
-        System.out.println("----------");
-        System.out.println();
-        System.out.println();
+        System.out.println("----------\n\n");
+
         JSONObject json = new JSONObject();
         json.put("errCode", "00");
         json.put("errMsg", "0000000(成功)");
