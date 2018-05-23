@@ -1,4 +1,4 @@
-## 使用Netty构建一个带注解的Http服务器
+## 使用Netty构建一个带注解的Http服务器框架
 
 ### 要实现怎样的效果
 
@@ -191,6 +191,59 @@ public class AllocHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
         FullHttpResponse response = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK, Unpooled.copiedBuffer(msg, CharsetUtil.UTF_8));
         response.headers().set("Content-Type", "text/plain");
         ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE);
+    }
+}
+```
+
+### 测试与使用
+
+* 建立一个TestController
+
+```java
+@Controller
+public class TestController {
+
+    @RequestMapping("/test")
+    public String testHandler(FullHttpRequest fullHttpRequest) {
+        return "1234";
+    }
+
+    @RequestMapping("/zx")
+    public String zx(FullHttpRequest fullHttpRequest) {
+        return "zhuxiong";
+    }
+
+    @RequestMapping("/obj")
+    public Object obj(FullHttpRequest fullHttpRequest) {
+        System.out.println("\n\n----------");
+        HttpHeaders httpHeaders = fullHttpRequest.headers();
+        Set<String> names = httpHeaders.names();
+        for (String name : names) {
+            System.out.println(name + " : " + httpHeaders.get(name));
+        }
+        System.out.println("");
+        ByteBuf byteBuf = fullHttpRequest.content();
+        byte[] byteArray = new byte[byteBuf.capacity()];
+        byteBuf.readBytes(byteArray);
+        System.out.println(new String(byteArray));
+        System.out.println("----------\n\n");
+
+        JSONObject json = new JSONObject();
+        json.put("errCode", "00");
+        json.put("errMsg", "0000000(成功)");
+        json.put("data", null);
+        return json;
+    }
+}
+```
+
+* 启动服务
+
+```java
+public class HttpServerTest {
+    public static void main(String[] args) throws Exception {
+        HttpServer httpServer = new HttpServer(8080);
+        httpServer.start();
     }
 }
 ```
