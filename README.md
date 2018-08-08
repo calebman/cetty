@@ -317,12 +317,13 @@ public class TestController {
 }
 ```
 
-* 启动服务
+* 启动Spring容器
 
 ```java
 public class HttpServerTest {
     public static void main(String[] args) throws Exception {
         CettyBootstrap.create();
+        // CettyBootstrap.create("classpath:applicationContext.xml");
     }
 }
 ```
