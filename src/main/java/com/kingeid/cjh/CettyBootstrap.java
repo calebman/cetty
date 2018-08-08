@@ -9,7 +9,7 @@ import org.springframework.util.StringUtils;
 
 public class CettyBootstrap {
     private static final Logger logger = LoggerFactory.getLogger(CettyBootstrap.class);
-    private static final String DEFAULT_SPRING_XMLPATH = "classpath:applicantContext.xml";
+    private static final String DEFAULT_SPRING_XMLPATH = "classpath:applicationContext.xml";
     private static final String DEFAULT_HTTP_SERVER_BEAN_NAME = "defaultHttpServer";
 
     public static void create() {
