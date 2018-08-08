@@ -56,14 +56,9 @@ public class HttpPipelineInitializer extends ChannelInitializer<Channel> {
 
 
 
-* 实现Controller以及RequestMapping两个核心注解，Controller注解用于标识那些类是控制器，RequestMapping注解用于标识处理器或者控制器对应匹配的接口地址。
+* 实现RequestMapping注解，用于标识处理器或者控制器对应匹配的接口地址。
 
 ```java
-@Target({ElementType.TYPE})
-@Retention(RetentionPolicy.RUNTIME)
-public @interface Controller {
-}
-
 @Target({ElementType.TYPE, ElementType.METHOD})
 @Retention(RetentionPolicy.RUNTIME)
 public @interface RequestMapping {
@@ -73,108 +68,187 @@ public @interface RequestMapping {
 
 
 
-* 启动时扫描控制器加载用户编写的对应地址的接口业务处理器，实现这个功能我们需要做一下几步操作
+* 提供启动入口，程序启动时创建Spring容器，并基于Spring初始化必要组件
 
-1. 定义一个包扫描工具类扫描class文件并提供一个处理接口
+1. 提供程序入口类
 
 ```java
-    /**
-     * 包扫描工具
-     * @param iPackage 根级包名
-     * @param iWhat 处理回调
-     */
-    public static void scanPackage(String iPackage, IWhat iWhat) {
-        String path = iPackage.replace(".", "/");
-        URL url = Thread.currentThread().getContextClassLoader().getResource(path);
+public class CettyBootstrap {
+    private static final Logger logger = LoggerFactory.getLogger(CettyBootstrap.class);
+    private static final String DEFAULT_SPRING_XMLPATH = "classpath:applicantContext.xml";
+    private static final String DEFAULT_HTTP_SERVER_BEAN_NAME = "defaultHttpServer";
+
+    public static void create() {
+        create(DEFAULT_SPRING_XMLPATH);
+    }
+
+    public static void create(String springXmlpath) {
+        if (StringUtils.isEmpty(springXmlpath)) {
+            springXmlpath = DEFAULT_SPRING_XMLPATH;
+        }
+        logger.debug("spring框架配置文件地址为{}", springXmlpath);
         try {
-            if (url != null && url.toString().startsWith("file")) {
-                String filePath = URLDecoder.decode(url.getFile(), "utf-8");
-                File dir = new File(filePath);
-                List<File> fileList = new ArrayList<File>();
-                fetchFileList(dir, fileList);
-                for (File f : fileList) {
-                    String fileName = f.getAbsolutePath();
-                    if (fileName.endsWith(".class")) {
-                        String nosuffixFileName = fileName.substring(8 + fileName.lastIndexOf("classes"), fileName.indexOf(".class"));
-                        String filePackage = nosuffixFileName.replaceAll("\\\\", ".");
-                        Class<?> clazz = Class.forName(filePackage);
-                        iWhat.execute(f, clazz);
-                    } else {
-                        iWhat.execute(f, null);
-                    }
-                }
+            ClassPathXmlApplicationContext context = new ClassPathXmlApplicationContext(springXmlpath.split("[,\\s]+"));
+            context.start();
+            logger.debug("spring框架启动成功");
+            try {
+                context.getBean(DEFAULT_HTTP_SERVER_BEAN_NAME, DefaultHttpServer.class);
+            } catch (NoSuchBeanDefinitionException ex) {
+                logger.warn("未配置HttpServer，采用默认配置启动");
+                context.getAutowireCapableBeanFactory().createBean(DefaultHttpServer.class);
             }
-        } catch (Exception e) {
+        } catch (BeansException e) {
             e.printStackTrace();
         }
-    }
-```
-
-2. 定义处理器实体类，用于存储处理地址以及处理器
-
-```java
-/**
- * @author calebman
- * @Date 2018-4-28
- * 处理器执行类
- */
-public class HttpHandler {
-    private Object clazzFromInstance;
-    private Method method;
-
-    public HttpHandler(Object clazzFromInstance, Method method) {
-        this.clazzFromInstance = clazzFromInstance;
-        this.method = method;
-    }
-
-    public Object execute(FullHttpRequest fullHttpRequest) throws InvocationTargetException, IllegalAccessException {
-        method.setAccessible(true);
-        return method.invoke(this.clazzFromInstance, (Object) fullHttpRequest);
     }
 }
 ```
 
-3. 扫描包并加入处理器列表
+2. 定义默认实现的HttpServer组件，随Spring容器启动时加载基于Netty的Web容器，并使用HandlerMapping组件初始化HttpPipelineInitializer管道，其中HandlerMapping如果未有用户定义则使用默认的DefaultHandlerMapping实现
 
 ```java
-    public static void loadHandlers(String packageName) {
-        AnnotationUtil.scanPackage(packageName, new AnnotationUtil.IWhat() {
-            @Override
-            public void execute(File file, Class<?> clazz) throws Exception {
-                if (clazz != null && clazz.isAnnotationPresent(Controller.class)) {
-                    System.out.println("load contorller " + clazz.getSimpleName());
-                    Object clazzFromInstance = clazz.newInstance();
-                    Method[] method = clazz.getDeclaredMethods();
-                    for (Method m : method) {
-                        if (m.isAnnotationPresent(RequestMapping.class)) {
-                            RequestMapping requestMapping = m.getAnnotation(RequestMapping.class);
-                            for (String url : requestMapping.value()) {
-                                HttpHandler httpHandler = httpHandlerMap.get(url);
-                                if (httpHandler == null) {
-                                    System.out.println("load url " + url + " handler " + m.getName());
-                                    httpHandlerMap.put(url, new HttpHandler(clazzFromInstance, m));
-                                } else {
-                                    System.err.println("url " + url + " has same handler");
-                                }
-                            }
-                        }
+public class DefaultHttpServer extends ApplicationObjectSupport {
+    private static final Logger logger = LoggerFactory.getLogger(DefaultHttpServer.class);
+    private static final String DEFAULT_HTTP_PORT = "8080";
+    private static final String HANDLER_MAPPING_BEAN_NAME = "handlerMapping";
+
+
+    private String port;
+
+    private HandlerMapping handlerMapping;
+
+    public void setPort(String port) {
+        this.port = port;
+    }
+
+    @Override
+    public void initApplicationContext(ApplicationContext applicationContext) {
+        beforeInit(applicationContext);
+        initHandlerMapping(applicationContext);
+        initServer();
+    }
+
+    void initHandlerMapping(ApplicationContext context) {
+        try {
+            this.handlerMapping = context.getBean(HANDLER_MAPPING_BEAN_NAME, HandlerMapping.class);
+        } catch (NoSuchBeanDefinitionException ex) {
+            this.handlerMapping = context.getAutowireCapableBeanFactory().createBean(DefaultHandlerMapping.class);
+        }
+    }
+
+    void initServer() {
+        logger.debug("初始化服务器");
+        if (!HttpUtils.isPort(port)) {
+            logger.warn("端口号不合法，使用默认端口{}", DEFAULT_HTTP_PORT);
+            port = DEFAULT_HTTP_PORT;
+        }
+        EventLoopGroup bossGroup = new NioEventLoopGroup();
+        EventLoopGroup workerGroup = new NioEventLoopGroup();
+        try {
+            ServerBootstrap b = new ServerBootstrap();
+            b.group(bossGroup, workerGroup)
+                    .channel(NioServerSocketChannel.class)
+                    .localAddress(new InetSocketAddress(Integer.parseInt(port)))
+                    .childHandler(new HttpPipelineInitializer(handlerMapping));
+
+            ChannelFuture f = b.bind().sync();
+            logger.info("服务启动成功，监听{}端口", port);
+            f.channel().closeFuture().sync();
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        } finally {
+            try {
+                workerGroup.shutdownGracefully().sync();
+                bossGroup.shutdownGracefully().sync();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    protected void beforeInit(ApplicationContext applicationContext) {
+
+    }
+
+}
+```
+
+3. 提供默认的HandlerMapping实现类，负责匹配@RequestMapping注解下的处理函数
+
+```java
+public class DefaultHandlerMapping extends ApplicationObjectSupport implements HandlerMapping {
+    Logger logger = LoggerFactory.getLogger(DefaultHandlerMapping.class);
+
+    private static Map<String, HttpHandler> httpHandlerMap = new HashMap<String, HttpHandler>();
+
+    @Override
+    public void initApplicationContext(ApplicationContext context) throws BeansException {
+        logger.debug("初始化处理匹配器");
+        Map<String, Object> handles = context.getBeansWithAnnotation(Controller.class);
+        try {
+            for (Map.Entry<String, Object> entry : handles.entrySet()) {
+                logger.debug("加载控制器{}", entry.getKey());
+                loadHttpHandler(entry.getValue());
+            }
+        } catch (IllegalAccessException e) {
+            e.printStackTrace();
+        } catch (InstantiationException e) {
+            e.printStackTrace();
+        }
+    }
+
+    void loadHttpHandler(Object value) throws IllegalAccessException, InstantiationException {
+        Class clazz = value.getClass();
+        Object clazzFromInstance = clazz.newInstance();
+        Method[] method = clazz.getDeclaredMethods();
+        for (Method m : method) {
+            if (m.isAnnotationPresent(RequestMapping.class)) {
+                RequestMapping requestMapping = m.getAnnotation(RequestMapping.class);
+                for (String url : requestMapping.value()) {
+                    HttpHandler httpHandler = httpHandlerMap.get(url);
+                    if (httpHandler == null) {
+                        logger.info("加载url为{}的处理器{}", url, m.getName());
+                        httpHandlerMap.put(url, new HttpHandler(clazzFromInstance, m));
+                    } else {
+                        logger.warn("url{}存在相同的处理器", url);
                     }
                 }
             }
-        });
+        }
     }
+
+    @Override
+    public HttpHandler getHadnler(FullHttpRequest request) {
+        return httpHandlerMap.get(request.uri());
+    }
+}
 ```
 
 
 
-* 编写业务处理器的控制中心
+* 当请求进入时通过HandlerMapping组件匹配处理器，如果匹配失败则返回404
 
 ```java
 public class AllocHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
 
+    private HandlerMapping handlerMapping;
+
+    public AllocHandler(HandlerMapping handlerMapping) {
+        this.handlerMapping = handlerMapping;
+    }
+
+    /*
+    异常处理
+     */
+    @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+        sendError(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR);
+        super.exceptionCaught(ctx, cause);
+    }
+
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, FullHttpRequest fullHttpRequest) throws Exception {
-        HttpHandler httpHandler = HttpController.getHandler(fullHttpRequest.uri());
+        HttpHandler httpHandler = handlerMapping.getHadnler(fullHttpRequest);
         if (httpHandler != null) {
             Object obj = httpHandler.execute(fullHttpRequest);
             if (obj instanceof String) {
@@ -189,6 +263,12 @@ public class AllocHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
 
     private void sendMessage(ChannelHandlerContext ctx, String msg) {
         FullHttpResponse response = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK, Unpooled.copiedBuffer(msg, CharsetUtil.UTF_8));
+        response.headers().set("Content-Type", "text/plain");
+        ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE);
+    }
+
+    private void sendError(ChannelHandlerContext ctx, HttpResponseStatus httpResponseStatus) {
+        FullHttpResponse response = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, httpResponseStatus, Unpooled.copiedBuffer(httpResponseStatus.toString(), CharsetUtil.UTF_8));
         response.headers().set("Content-Type", "text/plain");
         ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE);
     }
@@ -242,14 +322,14 @@ public class TestController {
 ```java
 public class HttpServerTest {
     public static void main(String[] args) throws Exception {
-        HttpServer httpServer = new HttpServer(8080);
-        httpServer.start();
+        CettyBootstrap.create();
     }
 }
 ```
 
 ### 未来要做的
 
+- [x] 与Spring框架集成，将核心组件托管给Spring容器统一管理
 - [ ] 提供静态资源映射
 - [ ] 修改映射策略将请求映射至一个流程（一个处理器多个拦截器）
 - [ ] 支持使用模板语法进行视图解析
